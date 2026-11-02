@@ -21,7 +21,6 @@ package atunnel
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -29,7 +28,6 @@ import (
 	"net/url"
 	"time"
 
-	"go.ate.dev/substrate/internal/ateletdial"
 	"go.ate.dev/substrate/internal/atunnel/dns"
 	"go.ate.dev/substrate/internal/atunnel/egress"
 	"go.ate.dev/substrate/internal/atunnel/ingress"
@@ -41,14 +39,6 @@ import (
 	"go.ate.dev/substrate/internal/resources"
 	"go.ate.dev/substrate/internal/serverboot"
 )
-
-// resolvConfPath holds the worker pod's resolvers. Tests override it.
-var resolvConfPath = "/etc/resolv.conf"
-
-// FlagSet is the registration surface that flag.FlagSet and pflag.FlagSet share.
-type FlagSet interface {
-	StringVar(p *string, name, value, usage string)
-}
 
 // Config is the atunnel setup a worker takes from its flags.
 type Config struct {
@@ -73,6 +63,11 @@ type Config struct {
 	EgressTrustBundle string
 	// DNSEgressPolicy selects the DNS egress policy enforcement mode.
 	DNSEgressPolicy string
+}
+
+// FlagSet is the registration surface that flag.FlagSet and pflag.FlagSet share.
+type FlagSet interface {
+	StringVar(p *string, name, value, usage string)
 }
 
 // RegisterFlags registers the atunnel flags on fs and returns the Config they
@@ -106,8 +101,6 @@ type Tunnel struct {
 	DNSRelay *dns.Relay
 
 	cfg Config
-	// ateletTLS is used to authenticate to atelet to fetch egress policies.
-	ateletTLS *tls.Config
 }
 
 // Start builds the DNS relay and starts serving actor ingress, which proxies
@@ -122,14 +115,7 @@ func Start(ctx context.Context, cfg Config, upstream string) (*Tunnel, error) {
 		return nil, fmt.Errorf("while parsing atunnel upstream: %w", err)
 	}
 
-	dnsRelay, err := dns.NewRelay(resolvConfPath)
-	if err != nil {
-		return nil, fmt.Errorf("configuring DNS relay: %w", err)
-	}
-	ateletTLS, err := ateletdial.TLSConfig(cfg.CredentialBundle, cfg.TrustBundle, cfg.BrokerIdentity)
-	if err != nil {
-		return nil, fmt.Errorf("configuring the atelet connection: %w", err)
-	}
+	dnsRelay := dns.NewRelay()
 
 	// Ingress
 	ingressServer, err := ingress.NewServer(ingress.Config{
@@ -163,8 +149,7 @@ func Start(ctx context.Context, cfg Config, upstream string) (*Tunnel, error) {
 			Egress:     egressProxy,
 			EgressPort: egressPort,
 			DNSRelay:   dnsRelay,
-			cfg:        cfg,
-			ateletTLS:  ateletTLS},
+			cfg:        cfg},
 		nil
 }
 
@@ -188,6 +173,9 @@ func serve(ctx context.Context, name, address string, serveFn func(context.Conte
 type ActorEgress struct {
 	// client presents the actor certificate to the remote egress gateway.
 	client *egress.Client
+	// doh exchanges the actor's DNS queries with the gateway's DoH endpoint,
+	// on the same certificate.
+	doh *egress.DoHClient
 	// certificateSource owns the actor key and renews its certificate via atelet.
 	certificateSource *egress.BrokerCertificateSource
 	expiresAt         time.Time
@@ -233,7 +221,16 @@ func (t *Tunnel) PrepareEgress(ctx context.Context, actor resources.ActorAttribu
 	if err != nil {
 		return nil, fmt.Errorf("while configuring actor egress client: %w", err)
 	}
-	return &ActorEgress{client: gatewayClient, certificateSource: certificateSource, expiresAt: expiresAt}, nil
+	dohClient, err := egress.NewDoHClient(egress.ClientConfig{
+		GatewayAddress:       gateway.GetAddress(),
+		ServerName:           serverName,
+		GetClientCertificate: certificateSource.GetClientCertificate,
+		TrustBundlePath:      t.cfg.EgressTrustBundle,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("while configuring actor DoH client: %w", err)
+	}
+	return &ActorEgress{client: gatewayClient, doh: dohClient, certificateSource: certificateSource, expiresAt: expiresAt}, nil
 }
 
 // ActivateEgress starts tunneling the actor's outbound traffic. Call it before
@@ -243,7 +240,7 @@ func (t *Tunnel) ActivateEgress(actor resources.ActorAttribution, actorEgress *A
 	if actorEgress == nil {
 		return nil
 	}
-	if err := t.Egress.Activate(actor.UID, actorEgress.client, actorEgress.certificateSource, actorEgress.expiresAt); err != nil {
+	if err := t.Egress.Activate(actor.UID, actorEgress.client, actorEgress.certificateSource, actorEgress.expiresAt, actorEgress.doh); err != nil {
 		return fmt.Errorf("while activating actor egress: %w", err)
 	}
 	return nil

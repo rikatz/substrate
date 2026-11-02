@@ -61,6 +61,8 @@ type activation struct {
 	dialer            tunnelDialer
 	certificateSource actorCertificateSource
 	expiresAt         time.Time
+	// doh exchanges the actor's DNS queries with the egress gateway.
+	doh *DoHClient
 
 	// ctx scopes certificate renewal and every tunnel opened by this activation. wg
 	// lets Deactivate wait until both renewal and tunnel forwarding have exited.
@@ -142,7 +144,8 @@ func (e *Proxy) serve(ctx context.Context, listener net.Listener, active *activa
 }
 
 // Activate enables the actor's egress and certificate renewal until deactivation.
-func (e *Proxy) Activate(actorUID string, dialer tunnelDialer, certificateSource actorCertificateSource, expiresAt time.Time) error {
+// doh carries the actor's DNS queries; nil leaves DNS failing closed.
+func (e *Proxy) Activate(actorUID string, dialer tunnelDialer, certificateSource actorCertificateSource, expiresAt time.Time, doh *DoHClient) error {
 	if actorUID == "" {
 		return fmt.Errorf("egress: actor UID is required")
 	}
@@ -164,9 +167,23 @@ func (e *Proxy) Activate(actorUID string, dialer tunnelDialer, certificateSource
 	active.dialer = dialer
 	active.certificateSource = certificateSource
 	active.expiresAt = expiresAt
+	active.doh = doh
 	active.wg.Add(1)
 	go e.renew(active, expiresAt)
 	return nil
+}
+
+// DoHExchange returns the actor's DoH exchange, or nil when the actor has no
+// active egress to carry it. Looked up per call: the DNS servers bind before
+// the activation exists, like the egress listeners do.
+func (e *Proxy) DoHExchange(actorUID string) func(ctx context.Context, query []byte) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	active := e.active[actorUID]
+	if active == nil || active.doh == nil {
+		return nil
+	}
+	return active.doh.Exchange
 }
 
 func (e *Proxy) renew(active *activation, expiresAt time.Time) {
@@ -276,6 +293,9 @@ func (e *Proxy) Deactivate(ctx context.Context, actorUID string) error {
 	}
 	if active.dialer != nil {
 		err = errors.Join(err, active.dialer.Close())
+	}
+	if active.doh != nil {
+		active.doh.Close()
 	}
 	return err
 }

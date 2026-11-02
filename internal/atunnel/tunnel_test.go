@@ -161,14 +161,6 @@ func testConfigAndCA(t *testing.T) (Config, testCA) {
 		t.Fatal(err)
 	}
 
-	resolvConf := filepath.Join(dir, "resolv.conf")
-	if err := os.WriteFile(resolvConf, []byte("nameserver 127.0.0.1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := resolvConfPath
-	resolvConfPath = resolvConf
-	t.Cleanup(func() { resolvConfPath = old })
-
 	return Config{
 		ListenAddress:        freeAddress(t),
 		ConnectListenAddress: freeAddress(t),
@@ -248,22 +240,8 @@ func TestStartErrors(t *testing.T) {
 			edit:    func(_ *testing.T, cfg *Config) { cfg.DNSEgressPolicy = "invalid" },
 			wantErr: true,
 		},
-		"no resolvers": {
-			edit: func(t *testing.T, _ *Config) {
-				empty := filepath.Join(t.TempDir(), "resolv.conf")
-				if err := os.WriteFile(empty, nil, 0o600); err != nil {
-					t.Fatal(err)
-				}
-				resolvConfPath = empty
-			},
-			wantErr: true,
-		},
 		"missing credentials": {
 			edit:    func(t *testing.T, cfg *Config) { cfg.CredentialBundle = filepath.Join(t.TempDir(), "absent.pem") },
-			wantErr: true,
-		},
-		"no atelet identity": {
-			edit:    func(_ *testing.T, cfg *Config) { cfg.BrokerIdentity = "" },
 			wantErr: true,
 		},
 		"ingress address in use": {

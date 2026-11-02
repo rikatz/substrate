@@ -109,7 +109,6 @@ func (h *Host) host(ctx context.Context, attribution resources.ActorAttribution,
 		ActorUID:   attribution.UID,
 		Veth:       true,
 		EgressPort: h.tunnel.EgressPort,
-		DNSPolicy:  h.tunnel.ActorEgressPolicy(attribution),
 	}, h.tunnel.Egress, h.tunnel.DNSRelay)
 	if err != nil {
 		return err

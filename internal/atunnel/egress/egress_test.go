@@ -66,7 +66,7 @@ func TestEgressBindingDoesNotOutliveItsActivation(t *testing.T) {
 				if err := egress.Activate(testActorUID, tunnelDialerFunc(func(context.Context, string) (net.Conn, error) {
 					dialed <- generation
 					return nil, errors.New("test dial")
-				}), fakeActorCertificateSource{}, time.Now().Add(time.Hour)); err != nil {
+				}), fakeActorCertificateSource{}, time.Now().Add(time.Hour), nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -181,7 +181,7 @@ func TestEgressActivationFailsClosed(t *testing.T) {
 		t.Fatal("dialed after failed activation")
 		return nil, nil
 	})
-	if err := egress.Activate(testActorUID, dialer, fakeActorCertificateSource{err: errors.New("renewal failed")}, time.Time{}); err == nil {
+	if err := egress.Activate(testActorUID, dialer, fakeActorCertificateSource{err: errors.New("renewal failed")}, time.Time{}, nil); err == nil {
 		t.Fatal("Activate() succeeded")
 	}
 	actor, proxy := net.Pipe()
@@ -208,7 +208,7 @@ func TestEgressExpiryRejectsNewButPreservesEstablished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := egress.Activate(testActorUID, dialer, fakeActorCertificateSource{err: errors.New("renewal failed"), calls: &mints}, time.Now().Add(50*time.Millisecond)); err != nil {
+	if err := egress.Activate(testActorUID, dialer, fakeActorCertificateSource{err: errors.New("renewal failed"), calls: &mints}, time.Now().Add(50*time.Millisecond), nil); err != nil {
 		t.Fatal(err)
 	}
 	actor, proxy := net.Pipe()
@@ -264,7 +264,7 @@ func TestEgressRenewsBeforeExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := egress.Activate(testActorUID, dialer, source, time.Now().Add(80*time.Millisecond)); err != nil {
+	if err := egress.Activate(testActorUID, dialer, source, time.Now().Add(80*time.Millisecond), nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -313,7 +313,7 @@ func TestEgressStopsAfterTerminalRenewalFailure(t *testing.T) {
 			}), fakeActorCertificateSource{
 				err:    fmt.Errorf("mint: %w", status.Error(code, "stale activation")),
 				called: called,
-			}, time.Now().Add(50*time.Millisecond)); err != nil {
+			}, time.Now().Add(50*time.Millisecond), nil); err != nil {
 				t.Fatal(err)
 			}
 			select {
@@ -352,7 +352,7 @@ func TestEgressDeactivationDropsConcurrentRenewal(t *testing.T) {
 		expiresAt: time.Now().Add(time.Hour),
 		called:    started,
 		release:   release,
-	}, time.Now().Add(50*time.Millisecond)); err != nil {
+	}, time.Now().Add(50*time.Millisecond), nil); err != nil {
 		t.Fatal(err)
 	}
 	egress.mu.Lock()
@@ -417,7 +417,7 @@ func TestEgressEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := egress.Activate(testActorUID, client, fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}, time.Now().Add(time.Hour)); err != nil {
+	if err := egress.Activate(testActorUID, client, fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -500,7 +500,7 @@ func TestEgressBoundsHowLongATunnelWaitsToOpen(t *testing.T) {
 	}
 	egress.tunnelOpenTimeout = 100 * time.Millisecond
 	source := fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}
-	if err := egress.Activate(testActorUID, client, source, time.Now().Add(time.Hour)); err != nil {
+	if err := egress.Activate(testActorUID, client, source, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = egress.Deactivate(context.Background(), testActorUID) })
@@ -569,11 +569,11 @@ func TestEgressIsArmedPerActor(t *testing.T) {
 		return nil, errors.New("not dialed in this test")
 	})
 	for _, uid := range []string{"actor-uid-1", "actor-uid-2"} {
-		if err := egress.Activate(uid, dialer, source, time.Now().Add(time.Hour)); err != nil {
+		if err := egress.Activate(uid, dialer, source, time.Now().Add(time.Hour), nil); err != nil {
 			t.Fatalf("activating %s: %v", uid, err)
 		}
 	}
-	if err := egress.Activate("actor-uid-1", dialer, source, time.Now().Add(time.Hour)); err == nil {
+	if err := egress.Activate("actor-uid-1", dialer, source, time.Now().Add(time.Hour), nil); err == nil {
 		t.Error("activating the same actor twice was allowed")
 	}
 
@@ -613,7 +613,7 @@ func TestEgressDeactivateClosesIdleH2Connection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := egress.Activate(testActorUID, client, fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}, time.Now().Add(time.Hour)); err != nil {
+	if err := egress.Activate(testActorUID, client, fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 

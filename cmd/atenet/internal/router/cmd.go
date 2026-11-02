@@ -24,6 +24,7 @@ import (
 
 	"go.ate.dev/substrate/cmd/atenet/internal/router/egress"
 	"go.ate.dev/substrate/cmd/atenet/internal/router/ingress"
+	"go.ate.dev/substrate/internal/doh"
 	"go.ate.dev/substrate/internal/installdefaults"
 )
 
@@ -64,6 +65,7 @@ func bindRouterFlags(fs *pflag.FlagSet, cfg *routerConfig) {
 	fs.IntVar(&cfg.XdsPort, "port-xds", 18000, "TCP port listening for the xDS dynamic Envoy connections")
 	fs.IntVar(&cfg.ExtprocPort, "port-extproc", 50051, "Listen port for the External Processing (ext_proc) server the dataplane calls")
 	fs.StringVar(&cfg.ExtprocAddr, "extproc-address", "127.0.0.1", "Address of the External Processing (ext_proc) server: both the address it binds and the address the co-located dataplane is told to dial. Defaults to loopback, which keeps it unreachable from other pods; readiness is probed via /readyz on the health port, not this one. Empty binds every interface")
+	fs.StringVar(&cfg.DoHAddress, "doh-address", doh.ListenAddress, "Address the egress-mode router serves DoH on for atunnel's DNS relay, behind the dataplane's DoH route. Defaults to loopback, like the ext_proc server. Empty disables the endpoint and every actor DNS query fails closed")
 	fs.IntVar(&cfg.StatusPort, "status-port", 4040, "Port to serve /statusz on (set <= 0 to disable serving status)")
 	fs.StringVar(&cfg.StatusAddr, "status-address", "127.0.0.1", "Address to bind the unauthenticated /statusz dashboard to. Defaults to loopback; use /healthz and /readyz on the health port for health checks. Empty binds every interface")
 	fs.DurationVar(&cfg.HealthInterval, "health-interval", 1*time.Second, "Interval for checking health of dependent services")

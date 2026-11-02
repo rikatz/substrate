@@ -113,7 +113,6 @@ func (s *AteWorkerService) hostActor(ctx context.Context, attribution resources.
 		ActorUID:   uid,
 		Veth:       true,
 		EgressPort: s.tunnel.EgressPort,
-		DNSPolicy:  s.tunnel.ActorEgressPolicy(attribution),
 	}, s.tunnel.Egress, s.tunnel.DNSRelay)
 	if err != nil {
 		evict()

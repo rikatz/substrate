@@ -65,7 +65,11 @@ type RouterServer struct {
 	// ingressHandler is the ingress handler registered on extprocSrv, kept for
 	// the status page's parking snapshot. Nil in egress-only mode.
 	ingressHandler *ingress.Handler
-	health         *routerHealth
+	// dohServer is the egress gateway's DoH endpoint, served on loopback
+	// behind the dataplane's DoH route. Nil unless the mode serves egress
+	// and --doh-address is set.
+	dohServer *egress.DoHServer
+	health    *routerHealth
 }
 
 func NewRouterServer(cfg routerConfig) (*RouterServer, error) {
@@ -254,6 +258,17 @@ func (s *RouterServer) Run(ctx context.Context) error {
 
 		egressHandler := egress.New(s.apiClient, loadActorIdentityRoots, s.cfg.EgressPolicyCacheTTL, providers)
 		handlers[egressHandler.Direction()] = egressHandler
+
+		// The DoH endpoint atunnel's DNS relay calls. Started below, next to
+		// the ext_proc server: same pod, same loopback discipline. Empty
+		// --doh-address leaves it off, and actor DNS fails closed.
+		if s.cfg.DoHAddress != "" {
+			dohServer, err := egressHandler.NewDoHServer()
+			if err != nil {
+				return fmt.Errorf("building the DoH server: %w", err)
+			}
+			s.dohServer = dohServer
+		}
 	}
 
 	if s.extprocSrv == nil {
@@ -315,6 +330,28 @@ func (s *RouterServer) Run(ctx context.Context) error {
 		// Serve returns nil after Stop/GracefulStop.
 		return extprocGRPC.Serve(lis)
 	})
+
+	// Start the DoH server for atunnel's DNS relay, on loopback behind the
+	// dataplane's DoH route. Serve fails the group if the listener breaks.
+	if s.dohServer != nil {
+		dohHTTP := &http.Server{Handler: s.dohServer}
+		g.Go(func() error {
+			slog.InfoContext(ctx, "Starting DoH server", slog.String("address", s.cfg.DoHAddress))
+			lis, err := net.Listen("tcp", s.cfg.DoHAddress)
+			if err != nil {
+				return fmt.Errorf("failed to listen on DoH address %q: %w", s.cfg.DoHAddress, err)
+			}
+			defer lis.Close()
+			go func() {
+				<-ctx.Done()
+				_ = dohHTTP.Close()
+			}()
+			if err := dohHTTP.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return err
+			}
+			return nil
+		})
+	}
 
 	// Start HTTP status endpoint
 	if statusListener != nil {

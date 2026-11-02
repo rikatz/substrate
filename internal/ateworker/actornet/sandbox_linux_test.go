@@ -352,6 +352,10 @@ func (e *slowEgress) Bind(string) (func(context.Context, net.Listener) error, er
 	}, nil
 }
 
+func (e *slowEgress) DoHExchange(string) func(context.Context, []byte) ([]byte, error) {
+	return nil
+}
+
 // Close's contract is that serving has stopped when it returns, not just that
 // the sockets are shut: a caller tearing an actor down needs the worker's
 // capacity back.

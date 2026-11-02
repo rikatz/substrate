@@ -69,10 +69,6 @@ type SandboxNetworkConfig struct {
 	// EgressPort is where atunnel serves this actor. Every TCP connection the
 	// actor makes is redirected to it, whatever port it was aimed at.
 	EgressPort uint16
-
-	// DNSPolicy supplies the egress policy the actor's DNS queries are checked
-	// against. Nil refuses every query.
-	DNSPolicy dns.PolicySource
 }
 
 // SetupSandboxNetwork creates isolated networking with fixed sandbox addresses.
@@ -424,6 +420,10 @@ func CleanupSandboxNetwork(network *SandboxNetwork) error {
 // egress.Proxy; an interface so this package does not depend on it.
 type egressServer interface {
 	Bind(actorUID string) (func(context.Context, net.Listener) error, error)
+	// DoHExchange answers the actor's DNS queries through the egress
+	// gateway. Nil when the actor has no active egress, which fails DNS
+	// closed.
+	DoHExchange(actorUID string) func(ctx context.Context, query []byte) ([]byte, error)
 }
 
 // ServeSandboxEgress serves redirected TCP in the gateway namespace.
@@ -470,8 +470,9 @@ type SandboxSession struct {
 }
 
 // ServeSandbox builds a sandbox's network and serves egress and DNS from its
-// gateway namespace. A nil server leaves that unserved, which fails closed.
-// DNS queries are checked against the policy cfg.DNSPolicy supplies.
+// gateway namespace. Nil servers leave their direction unserved, which fails
+// closed. Every well-formed DNS query is exchanged with the egress gateway,
+// which decides it against the actor's EgressPolicy.
 func ServeSandbox(ctx context.Context, cfg SandboxNetworkConfig, egress egressServer, resolver *dns.Relay) (_ *SandboxSession, retErr error) {
 	network, err := SetupSandboxNetwork(ctx, cfg)
 	if err != nil {
@@ -484,8 +485,12 @@ func ServeSandbox(ctx context.Context, cfg SandboxNetworkConfig, egress egressSe
 		}
 	}()
 
+	var dohExchange dns.Exchange
+	if egress != nil {
+		dohExchange = egress.DoHExchange(cfg.ActorUID)
+	}
 	if resolver != nil {
-		dnsServer, err := resolver.Serve(ctx, network.GatewayNetNS, cfg.DNSPolicy)
+		dnsServer, err := resolver.Serve(ctx, network.GatewayNetNS, dohExchange)
 		if err != nil {
 			return nil, err
 		}

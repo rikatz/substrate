@@ -37,10 +37,7 @@ func TestClosingSandboxDNSStopsServing(t *testing.T) {
 		_ = netns.RemoveNamed(nsName)
 	}()
 
-	relay, err := NewRelayForUpstreams([]string{"127.0.0.1:53"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	relay := NewRelay()
 	srv, err := relay.Serve(context.Background(), ns, nil)
 	if err != nil {
 		t.Fatal(err)

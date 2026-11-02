@@ -542,3 +542,36 @@ func TestValidateDNSEgressPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowsHostname(t *testing.T) {
+	policy := &ateapi.EgressPolicy{Rules: []*ateapi.EgressRule{
+		{Http: &ateapi.HttpRule{Hostnames: []string{"api.example.com"}, Ports: allPorts()}},
+		{Https: &ateapi.HttpsRule{Hostnames: []string{"*.openai.com"}}},
+	}}
+	compiled, _ := Compile(policy)
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "api.example.com", want: true},
+		{name: "API.EXAMPLE.COM.", want: true}, // normalized
+		{name: "chat.openai.com", want: true},  // wildcard
+		{name: "openai.com", want: false},      // wildcard covers subdomains only
+		{name: "evil.com", want: false},
+		{name: "", want: false},
+	}
+	for _, tc := range tests {
+		if got := compiled.AllowsHostname(tc.name); got != tc.want {
+			t.Errorf("AllowsHostname(%q) = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+
+	// A policy with no hostname patterns allows no name.
+	empty, _ := Compile(&ateapi.EgressPolicy{Rules: []*ateapi.EgressRule{
+		{Http: &ateapi.HttpRule{Ports: allPorts()}},
+	}})
+	if empty.AllowsHostname("example.com") {
+		t.Error("AllowsHostname allowed a name with no hostname patterns in the policy")
+	}
+}

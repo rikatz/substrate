@@ -149,10 +149,15 @@ type routerConfig struct {
 	XdsPort           int
 	ExtprocPort       int
 	ExtprocAddr       string
-	StatusPort        int
-	StatusAddr        string
-	HealthInterval    time.Duration
-	HttpsPort         int
+	// DoHAddress is where the egress-mode router serves DoH for atunnel's
+	// DNS relay, behind Envoy's egress_doh cluster. Defaults to loopback,
+	// like the ext_proc server. Empty disables the endpoint, which fails
+	// every actor DNS query closed.
+	DoHAddress     string
+	StatusPort     int
+	StatusAddr     string
+	HealthInterval time.Duration
+	HttpsPort      int
 	// ConnectTLSPort is the listener port for CONNECT-tunneled traffic.
 	// Non-positive disables the listener.
 	ConnectTLSPort int

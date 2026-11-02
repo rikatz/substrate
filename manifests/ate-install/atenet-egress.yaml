@@ -280,6 +280,65 @@ data:
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+        # ---------------------------------------------------------------------
+        # The DoH chain. atunnel's per-actor DNS relay connects with the
+        # ate-doh ALPN, so this chain -- not the CONNECT chain -- answers it,
+        # and no ext_proc or egress-policy module runs on the path: DNS is
+        # decided per query by the DoH handler behind the egress_doh
+        # cluster. Identity still rides the certificate: same actor-identity
+        # client cert requirement, and forward_client_cert_details carries
+        # the verified chain to the handler, exactly as the CONNECT leg
+        # carries it to ext_proc.
+        # ---------------------------------------------------------------------
+        - name: egress_doh
+          filter_chain_match:
+            application_protocols: ["ate-doh"]
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                alpn_protocols: ["h2", "ate-doh"]
+                tls_certificate_sds_secret_configs:
+                - name: servicedns_serving_cert
+                  sds_config:
+                    resource_api_version: V3
+                    path_config_source:
+                      path: /etc/envoy/sds-servicedns-cert.yaml
+                validation_context_sds_secret_config:
+                  name: actor_identity_validation_context
+                  sds_config:
+                    resource_api_version: V3
+                    path_config_source:
+                      path: /etc/envoy/sds-actor-identity-validation.yaml
+              forward_client_cert_details: SANITIZE_SET
+              set_current_client_cert_details:
+                chain: true
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: egress_doh
+              common_http_protocol_options:
+                idle_timeout: 30s
+              http2_protocol_options:
+                max_concurrent_streams: 100
+              route_config:
+                name: doh_route
+                virtual_hosts:
+                - name: doh
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route:
+                      cluster: egress_doh
+                      timeout: 10s
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
       # ---------------------------------------------------------------------
       # Listener B: the MITM leg. No socket of its own -- it is reachable only
       # through the mitm_internal cluster's envoy_internal_address, so it
@@ -877,6 +936,20 @@ data:
             - endpoint:
                 address:
                   socket_address: { address: 127.0.0.1, port_value: 15000 }
+      # The loopback hop to the DoH handler in the router container. Envoy's
+      # egress_doh filter chain fronts it with the actor-identity mTLS the
+      # egress listener enforces, so the handler itself can trust the
+      # x-forwarded-client-cert header Envoy sanitizes.
+      - name: egress_doh
+        connect_timeout: 1s
+        type: STATIC
+        load_assignment:
+          cluster_name: egress_doh
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: { address: 127.0.0.1, port_value: 7053 }
       # The only way into mitm_listener. An internal address, not a socket, so
       # the MITM leg has no listening port anywhere in the pod's netns.
       - name: mitm_internal

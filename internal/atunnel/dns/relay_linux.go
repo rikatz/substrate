@@ -1,18 +1,18 @@
-//go:build linux
-
 // Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+//go:build linux
 
 package dns
 
@@ -25,15 +25,13 @@ import (
 	"go.ate.dev/substrate/internal/netns"
 )
 
-// Serve serves UDP and TCP DNS in the sandbox's local gateway namespace.
-func (r *Relay) Serve(ctx context.Context, ns netns.Handle, policy PolicySource) (*Server, error) {
+// Serve serves UDP and TCP DNS in the sandbox's local gateway namespace,
+// exchanging every well-formed query through the supplied exchange.
+func (r *Relay) Serve(ctx context.Context, ns netns.Handle, exchange Exchange) (*Server, error) {
 	// Bind the wildcard because the microVM tap's gateway address is added later.
 	address := net.JoinHostPort("0.0.0.0", strconv.Itoa(dnsPort))
 
-	netC := netConn{
-		dialer: *r.dialer,
-	}
-
+	netC := &netConn{}
 	if err := netns.Do(ctx, ns, func(context.Context) error {
 		pc, err := net.ListenPacket("udp", address)
 		if err != nil {
@@ -51,13 +49,5 @@ func (r *Relay) Serve(ctx context.Context, ns netns.Handle, policy PolicySource)
 		return nil, err
 	}
 
-	egressUDP, err := net.ListenPacket("udp", ":0")
-	if err != nil {
-		_ = netC.udp.Close()
-		_ = netC.tcpListener.Close()
-		return nil, fmt.Errorf("while opening the worker DNS egress socket: %w", err)
-	}
-	netC.egressUDP = egressUDP
-
-	return r.serveOn(ctx, &netC, policy)
+	return r.serveOn(ctx, netC, exchange)
 }

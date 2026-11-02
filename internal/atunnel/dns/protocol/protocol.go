@@ -71,6 +71,11 @@ func SetTxnID(raw []byte, id uint16) {
 	binary.BigEndian.PutUint16(raw[0:2], id)
 }
 
+// TxnID returns the DNS packet's transaction ID.
+func TxnID(raw []byte) uint16 {
+	return binary.BigEndian.Uint16(raw[0:2])
+}
+
 // qdCountFromRaw from the raw packet.
 func QDCount(raw []byte) uint16 {
 	// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+

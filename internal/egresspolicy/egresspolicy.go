@@ -159,6 +159,26 @@ func Compile(policy *ateapi.EgressPolicy) (*Policy, []error) {
 // A policy with no rules can authorize nothing.
 func (p *Policy) RuleCount() int { return len(p.rules) }
 
+// AllowsHostname reports whether any rule's hostname patterns match name.
+// DNS resolution is decided by it: a name no rule lists does not resolve,
+// matching the rule kinds a hostname can be dialed under (http, https,
+// tls_passthrough). A name is normalized first; one that does not parse as
+// a hostname is never allowed.
+func (p *Policy) AllowsHostname(name string) bool {
+	host, ok := NormalizeHostname(name)
+	if !ok {
+		return false
+	}
+	for _, r := range p.rules {
+		for _, pattern := range r.patterns {
+			if pattern.Matches(host) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r compiledRule) matchesPort(port uint16) bool {
 	return r.anyPort || slices.Contains(r.ports, port)
 }
